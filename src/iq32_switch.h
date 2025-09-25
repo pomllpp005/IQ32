@@ -12,5 +12,6 @@ typedef enum {
 void Switch_Init(void);
 uint8_t Switch_Read(IQ32_Switch_t sw);    // คืนค่า 0=กด, 1=ไม่กด
 uint8_t Switch_IsPressed(IQ32_Switch_t sw);
-
+void Switch_WaitForPress_SW1(void);
+void Switch_WaitForPress_SW2(void);
 #endif
