@@ -1,101 +1,9 @@
 #include "iq32_board.h"
-#include "iq32_switch.h" // เพิ่มเพื่อเช็คสวิตช์
-
-#ifndef LED_PORT
-  #define LED_PORT GPIOA
-#endif
-#ifndef LED_PIN
-  #define LED_PIN GPIO_PIN_4
-#endif
-
-// เพิ่ม LED2 ค่าเริ่มต้น (สามารถ override ใน iq32_board.h)
-#ifndef LED2_PORT
-  #define LED2_PORT GPIOB
-#endif
-#ifndef LED2_PIN
-  #define LED2_PIN GPIO_PIN_15
-#endif
-
-static void StartupBlink(void)
-{
-    GPIO_InitTypeDef GPIO_InitStruct = {0};
-
-    // เปิด clock กว้างๆ (ปลอดภัยถ้าไม่ได้ใช้พอร์ตรวมบางพอร์ต)
-    __HAL_RCC_GPIOA_CLK_ENABLE();
-    __HAL_RCC_GPIOB_CLK_ENABLE();
-    __HAL_RCC_GPIOC_CLK_ENABLE();
-    __HAL_RCC_GPIOD_CLK_ENABLE();
-    __HAL_RCC_GPIOE_CLK_ENABLE();
-
-    // กำหนดพินเป็น output push-pull สำหรับทั้งสอง LED
-    GPIO_InitStruct.Pin = LED_PIN;
-    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-    HAL_GPIO_Init(LED_PORT, &GPIO_InitStruct);
-
-    GPIO_InitStruct.Pin = LED2_PIN;
-    HAL_GPIO_Init(LED2_PORT, &GPIO_InitStruct);
-
-    // กระพริบตัวอย่าง 7 ครั้ง (50ms on/off)
-    for (int i = 0; i < 7; ++i) {
-        HAL_GPIO_WritePin(LED_PORT, LED_PIN, GPIO_PIN_SET);
-        HAL_GPIO_WritePin(LED2_PORT, LED2_PIN, GPIO_PIN_SET);
-        HAL_Delay(50);
-        HAL_GPIO_WritePin(LED_PORT, LED_PIN, GPIO_PIN_RESET);
-        HAL_GPIO_WritePin(LED2_PORT, LED2_PIN, GPIO_PIN_RESET);
-        HAL_Delay(50);
-    }
-}
-
-// กระพริบทั้งสอง LED ครั้งเดียว (on_ms แบบเปิด, off_ms แบบปิด)
-void Blink_BothLEDsOnce(uint32_t on_ms, uint32_t off_ms)
-{
-    HAL_GPIO_WritePin(LED_PORT, LED_PIN, GPIO_PIN_SET);
-    HAL_GPIO_WritePin(LED2_PORT, LED2_PIN, GPIO_PIN_SET);
-    HAL_Delay(on_ms);
-    HAL_GPIO_WritePin(LED_PORT, LED_PIN, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(LED2_PORT, LED2_PIN, GPIO_PIN_RESET);
-    HAL_Delay(off_ms);
-}
-
-// กระพริบทั้งสอง LED จำนวนครั้ง
-void Blink_BothLEDsTimes(int times, uint32_t on_ms, uint32_t off_ms)
-{
-    for (int i = 0; i < times; ++i) {
-        Blink_BothLEDsOnce(on_ms, off_ms);
-    }
-}
-
-// กระพริบทั้งสอง LED ต่อเนื่องจนกว่าจะกด SW1
-void Blink_BothUntilSW1Pressed(uint32_t on_ms, uint32_t off_ms)
-{
-    for (;;) {
-        Blink_BothLEDsOnce(on_ms, off_ms);
-        if (Switch_IsPressed(SW1)) {
-            // ปิด LED ก่อนออก
-            HAL_GPIO_WritePin(LED_PORT, LED_PIN, GPIO_PIN_RESET);
-            HAL_GPIO_WritePin(LED2_PORT, LED2_PIN, GPIO_PIN_RESET);
-            break;
-        }
-    }
-}
-
-void IQ32_Init(void)
-{
-    HAL_Init();
-    MX_GPIO_Init();
-    // blink after GPIO init
-    StartupBlink();
-    MX_TIM2_Init();
-    // อนาคตถ้ามี UART, I2C, SPI → ใส่เพิ่ม
-}
 
 
-
-// Handle
 GPIO_InitTypeDef GPIO_InitStruct;
 TIM_HandleTypeDef htim2;
+I2C_HandleTypeDef hi2c1;
 
 // --- ตั้งค่า Timer2 สำหรับ PWM บน PA0 (CH1), PA1 (CH2), PA2 (CH3) ---
 void MX_TIM2_Init(void)
@@ -128,11 +36,26 @@ void MX_TIM2_Init(void)
     HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3);
 }
 
+
+void MX_I2C1_Init(void)
+{
+    hi2c1.Instance = I2C1;
+    hi2c1.Init.ClockSpeed = 400000; // หรือ 100000 ถ้าใช้ I2C slow mode
+    hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
+    hi2c1.Init.OwnAddress1 = 0;
+    hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+    hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+    hi2c1.Init.OwnAddress2 = 0;
+    hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+    hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+    HAL_I2C_Init(&hi2c1);
+}
 // --- ตั้งค่า GPIO ---
 void MX_GPIO_Init(void)
 {
     __HAL_RCC_GPIOA_CLK_ENABLE();
     __HAL_RCC_GPIOB_CLK_ENABLE();
+    __HAL_RCC_GPIOC_CLK_ENABLE();
 
     // INA/INB มอเตอร์1 (ซ้าย) = PA8, PA9
     GPIO_InitStruct.Pin = GPIO_PIN_8 | GPIO_PIN_9;
@@ -154,6 +77,7 @@ void MX_GPIO_Init(void)
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
     // LED = PB4, PA15
+   
     GPIO_InitStruct.Pin = GPIO_PIN_4;
     GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
@@ -166,4 +90,77 @@ void MX_GPIO_Init(void)
     GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
     GPIO_InitStruct.Pull = GPIO_PULLUP;  // ใช้ Pull-up
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+    // SW2 = PC9 (Active-Low)
+    GPIO_InitStruct.Pin = GPIO_PIN_9;
+    GPIO_InitStruct.Mode = GPIO_MODE_INPUT; 
+    GPIO_InitStruct.Pull = GPIO_PULLUP;  // ใช้ Pull-up
+    HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+    // I2C1 = PB8(SCL), PB9(SDA)
+    __HAL_RCC_I2C1_CLK_ENABLE();
+    GPIO_InitStruct.Pin = GPIO_PIN_8 | GPIO_PIN_9;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
+    GPIO_InitStruct.Pull = GPIO_PULLUP;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    GPIO_InitStruct.Alternate = GPIO_AF4_I2C1;
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+   
+
+    // เริ่มต้นอุปกรณ์เสริมอื่นๆ
+    MUX_Init(); // เริ่มต้น MUX
+    Battery_Init(); // เริ่มต้น ADC  สำหรับวัดแรงดันแบตเตอรี่
+    MPU6500_Init(); // เริ่มต้น MPU6500 (IMU)
+   
+
+}
+// --- ฟังก์ชันเริ่มต้นบอร์ด IQ32 ---
+
+void IQ32_Init(void)
+{
+    HAL_Init();
+    MX_GPIO_Init();
+    MX_TIM2_Init();
+    MX_I2C1_Init();
+    ssd1306_Init();
+    for (int i = 0; i < 5; i++) {
+        LED_On(LED1);
+        LED_On(LED2);
+        HAL_Delay(50);
+        LED_Off(LED1);
+        LED_Off(LED2);
+        HAL_Delay(50);
+    }
+   
+    // อนาคตถ้ามี UART, I2C, SPI → ใส่เพิ่ม
+}
+
+
+
+// Handle
+
+
+void Wait_SW1(void){
+    while(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_12) == GPIO_PIN_SET){} // รอจนกว่าจะกด SW1
+    HAL_Delay(50); // ดีเลย์ตัดเด้ง
+    LED_On(LED2);
+    HAL_Delay(100);
+    LED_Off(LED2);
+    HAL_Delay(100);
+    LED_On(LED2); 
+    HAL_Delay(100);
+    LED_Off(LED2);
+    HAL_Delay(100);
+}
+void Wait_SW2(void){
+    while(HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_9) == GPIO_PIN_SET){} // รอจนกว่าจะกด SW2
+    HAL_Delay(50); // ดีเลย์ตัดเด้ง
+    LED_On(LED1);
+    HAL_Delay(100);
+    LED_Off(LED1);
+    HAL_Delay(100);
+    LED_On(LED1);
+    HAL_Delay(100);
+    LED_Off(LED1);
+
 }

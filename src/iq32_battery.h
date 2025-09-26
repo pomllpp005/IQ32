@@ -5,5 +5,6 @@
 
 void Battery_Init(void);
 float Battery_GetVoltage(void);
+uint16_t Battery_GetRaw(void);
 
 #endif

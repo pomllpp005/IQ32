@@ -1,0 +1,239 @@
+#include "ssd1306.h"
+#include "ssd1306_fonts.h"
+#include <stdio.h>   
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>  // For memcpy
+
+#if defined(SSD1306_USE_I2C)
+void ssd1306_Reset(void) {
+    /* สำหรับ I2C ไม่ต้องทำอะไร */
+}
+
+void ssd1306_WriteCommand(uint8_t byte) {
+    HAL_I2C_Mem_Write(&SSD1306_I2C_PORT, SSD1306_I2C_ADDR, 0x00, 1, &byte, 1, HAL_MAX_DELAY);
+}
+
+void ssd1306_WriteData(uint8_t* buffer, size_t buff_size) {
+    HAL_I2C_Mem_Write(&SSD1306_I2C_PORT, SSD1306_I2C_ADDR, 0x40, 1, buffer, buff_size, HAL_MAX_DELAY);
+}
+
+#elif defined(SSD1306_USE_SPI)
+void ssd1306_Reset(void) {
+    HAL_GPIO_WritePin(SSD1306_CS_Port, SSD1306_CS_Pin, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(SSD1306_Reset_Port, SSD1306_Reset_Pin, GPIO_PIN_RESET);
+    HAL_Delay(10);
+    HAL_GPIO_WritePin(SSD1306_Reset_Port, SSD1306_Reset_Pin, GPIO_PIN_SET);
+    HAL_Delay(10);
+}
+
+void ssd1306_WriteCommand(uint8_t byte) {
+    HAL_GPIO_WritePin(SSD1306_CS_Port, SSD1306_CS_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(SSD1306_DC_Port, SSD1306_DC_Pin, GPIO_PIN_RESET);
+    HAL_SPI_Transmit(&SSD1306_SPI_PORT, &byte, 1, HAL_MAX_DELAY);
+    HAL_GPIO_WritePin(SSD1306_CS_Port, SSD1306_CS_Pin, GPIO_PIN_SET);
+}
+
+void ssd1306_WriteData(uint8_t* buffer, size_t buff_size) {
+    HAL_GPIO_WritePin(SSD1306_CS_Port, SSD1306_CS_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(SSD1306_DC_Port, SSD1306_DC_Pin, GPIO_PIN_SET);
+    HAL_SPI_Transmit(&SSD1306_SPI_PORT, buffer, buff_size, HAL_MAX_DELAY);
+    HAL_GPIO_WritePin(SSD1306_CS_Port, SSD1306_CS_Pin, GPIO_PIN_SET);
+}
+#else
+#error "คุณต้องกำหนด SSD1306_USE_SPI หรือ SSD1306_USE_I2C"
+#endif
+
+// ----------------- Screen buffer -----------------
+static uint8_t SSD1306_Buffer[SSD1306_BUFFER_SIZE];
+static SSD1306_t SSD1306;
+
+
+// ----------------- Buffer Functions -----------------
+SSD1306_Error_t ssd1306_FillBuffer(uint8_t* buf, uint32_t len) {
+    if(len <= SSD1306_BUFFER_SIZE) {
+        memcpy(SSD1306_Buffer, buf, len);
+        return SSD1306_OK;
+    }
+    return SSD1306_ERR;
+}
+
+void ssd1306_Fill(SSD1306_COLOR color) {
+    memset(SSD1306_Buffer, (color == Black) ? 0x00 : 0xFF, sizeof(SSD1306_Buffer));
+}
+
+// ----------------- Screen Update -----------------
+void ssd1306_UpdateScreen(void) {
+    for(uint8_t i = 0; i < SSD1306_HEIGHT/8; i++) {
+        ssd1306_WriteCommand(0xB0 + i);
+        ssd1306_WriteCommand(0x00 + SSD1306_X_OFFSET_LOWER);
+        ssd1306_WriteCommand(0x10 + SSD1306_X_OFFSET_UPPER);
+        ssd1306_WriteData(&SSD1306_Buffer[SSD1306_WIDTH*i], SSD1306_WIDTH);
+    }
+}
+
+// ----------------- Pixel -----------------
+void ssd1306_DrawPixel(uint8_t x, uint8_t y, SSD1306_COLOR color) {
+    if(x >= SSD1306_WIDTH || y >= SSD1306_HEIGHT) return;
+    if(color == White)
+        SSD1306_Buffer[x + (y/8)*SSD1306_WIDTH] |= 1 << (y%8);
+    else
+        SSD1306_Buffer[x + (y/8)*SSD1306_WIDTH] &= ~(1 << (y%8));
+}
+// ----------------- Orientation Enum -----------------
+// typedef enum {
+//     SSD1306_NORMAL = 0,
+//     SSD1306_MIRROR_H = 1,
+//     SSD1306_MIRROR_V = 2,
+//     SSD1306_MIRROR_HV = 3
+// } SSD1306_Orientation_t;
+
+// ----------------- Orientation / Screen Rotation -----------------
+void ssd1306_RotateScreen(SSD1306_Orientation_t orientation) {
+    switch(orientation) {
+        case SSD1306_NORMAL:
+            ssd1306_WriteCommand(0xC8); // COM scan normal
+            ssd1306_WriteCommand(0xA1); // Segment remap normal
+            break;
+        case SSD1306_MIRROR_H:
+            ssd1306_WriteCommand(0xC8);
+            ssd1306_WriteCommand(0xA0);
+            break;
+        case SSD1306_MIRROR_V:
+            ssd1306_WriteCommand(0xC0);
+            ssd1306_WriteCommand(0xA1);
+            break;
+        case SSD1306_MIRROR_HV:
+            ssd1306_WriteCommand(0xC0);
+            ssd1306_WriteCommand(0xA0);
+            break;
+    }
+}
+
+// ----------------- Init -----------------
+void ssd1306_Init(void) {
+    ssd1306_Reset();
+    HAL_Delay(100);
+    ssd1306_SetDisplayOn(0);
+
+    ssd1306_WriteCommand(0x20); // Memory addressing mode
+    ssd1306_WriteCommand(0x00); // Horizontal
+
+    ssd1306_WriteCommand(0xB0);
+    ssd1306_RotateScreen(SSD1306_MIRROR_HV); // default orientation
+
+    ssd1306_WriteCommand(0x00);
+    ssd1306_WriteCommand(0x10);
+    ssd1306_WriteCommand(0x40);
+    ssd1306_SetContrast(0xFF);
+
+    ssd1306_WriteCommand(0xA6); // Normal color
+    ssd1306_WriteCommand(0xA8);  
+    ssd1306_WriteCommand(0x1F); // 128x32 multiplex
+    ssd1306_WriteCommand(0xDA);  
+    ssd1306_WriteCommand(0x02); // COM pins
+    ssd1306_WriteCommand(0xDB);
+    ssd1306_WriteCommand(0x20);
+    ssd1306_WriteCommand(0x8D);
+    ssd1306_WriteCommand(0x14);
+    ssd1306_SetDisplayOn(1);
+
+    ssd1306_Fill(Black);
+    ssd1306_UpdateScreen();
+
+    SSD1306.CurrentX = 0;
+    SSD1306.CurrentY = 0;
+    SSD1306.Initialized = 1;
+}
+
+// ----------------- Display -----------------
+void ssd1306_SetDisplayOn(uint8_t on) {
+    if(on) {
+        ssd1306_WriteCommand(0xAF);
+        SSD1306.DisplayOn = 1;
+    } else {
+        ssd1306_WriteCommand(0xAE);
+        SSD1306.DisplayOn = 0;
+    }
+}
+
+uint8_t ssd1306_GetDisplayOn() {
+    return SSD1306.DisplayOn;
+}
+
+void ssd1306_SetContrast(uint8_t value) {
+    ssd1306_WriteCommand(0x81);
+    ssd1306_WriteCommand(value);
+}
+
+// ----------------- Text -----------------
+void ssd1306_SetCursor(uint8_t x, uint8_t y) {
+    SSD1306.CurrentX = x;
+    SSD1306.CurrentY = y;
+}
+
+char ssd1306_WriteChar(char ch, SSD1306_Font_t Font, SSD1306_COLOR color) {
+    if(ch < 32 || ch > 126) return 0;
+
+    uint8_t char_width = Font.char_width ? Font.char_width[ch-32] : Font.width;
+    if(SSD1306_WIDTH < (SSD1306.CurrentX + char_width) || 
+       SSD1306_HEIGHT < (SSD1306.CurrentY + Font.height))
+        return 0;
+
+    for(uint32_t i = 0; i < Font.height; i++) {
+        uint32_t b = Font.data[(ch-32)*Font.height + i];
+        for(uint32_t j = 0; j < char_width; j++) {
+            if((b << j) & 0x8000)
+                ssd1306_DrawPixel(SSD1306.CurrentX + j, SSD1306.CurrentY + i, color);
+            else
+                ssd1306_DrawPixel(SSD1306.CurrentX + j, SSD1306.CurrentY + i, !color);
+        }
+    }
+
+    SSD1306.CurrentX += char_width;
+    return ch;
+}
+
+char ssd1306_WriteString(char* str, SSD1306_Font_t Font, SSD1306_COLOR color) {
+    while(*str) {
+        if(ssd1306_WriteChar(*str, Font, color) != *str) return *str;
+        str++;
+    }
+    return *str;
+}
+void ssd1306_SetCursorLine(uint8_t col, uint8_t line, SSD1306_Font_t Font) {
+    SSD1306.CurrentX = col;
+    SSD1306.CurrentY = line * Font.height;
+}
+void OLED_ShowInt(int value, uint8_t x, uint8_t y) {
+    char buf[16];
+    sprintf(buf, "%d", value);
+    ssd1306_SetCursorLine(x, y, Font_6x8);
+    ssd1306_WriteString(buf, Font_6x8, White);
+    
+}
+// void OLED_ShowFloat(float value, uint8_t decimalPlaces, uint8_t x, uint8_t y) {
+//     char buf[16];
+//     char format[8];
+//     sprintf(format, "%%.%df", decimalPlaces);
+//     sprintf(buf, format, value);
+//     ssd1306_SetCursor(x, y);
+//     ssd1306_WriteString(buf, Font_7x10, White);
+
+// }
+void OLED_ShowFloat(float value, uint8_t decimalPlaces, uint8_t x, uint8_t y) {
+    char buf[20];
+    float factor = powf(10, decimalPlaces);
+    
+    // ปัดค่าก่อนแยกส่วนจำนวนเต็มและทศนิยม
+    long total = (long)roundf(value * factor);
+    long intPart = total / (long)factor;
+    long fracPart = labs(total % (long)factor); // ใช้ labs เผื่อค่าลบ
+    
+    // สร้าง string แสดงผล
+    sprintf(buf, "%ld.%0*ld", intPart, decimalPlaces, fracPart);
+    
+    // แสดงบนจอ
+    ssd1306_SetCursor(x, y);
+    ssd1306_WriteString(buf, Font_7x10, White);
+}
