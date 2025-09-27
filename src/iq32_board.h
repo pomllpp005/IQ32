@@ -11,6 +11,9 @@
 #include "iq32_Mux.h"
 #include "ssd1306_fonts.h"
 #include "ssd1306.h"
+#include "iq32_linesensor.h"
+#include "iq32_pid_improved.h"
+#include "iq32_pid.h"
 
 #include <stdbool.h>
 #include <stdint.h>
