@@ -6,7 +6,9 @@ static ADC_HandleTypeDef hadc1;
 // เช่น ถ้าแบ่งครึ่ง ให้ vDivider = 2.0f
 static const float vRef = 3.3f;
 static const uint16_t adcMax = 4095;  // 12-bit ADC
-static const float vDivider = 2.0f;   // สมมติแบ่งแรงดัน 2:1
+static const float R1 = 1000.0f;
+static const float R2 = 220.0f;
+static const float vDivider = (R1 + R2) / R2;
 
 void Battery_Init(void)
 {
@@ -57,4 +59,17 @@ uint16_t Battery_GetRaw(void)
     uint16_t raw = HAL_ADC_GetValue(&hadc1);
     HAL_ADC_Stop(&hadc1);
     return raw;
+}
+float Battery_GetVoltage_Avg(void )
+{
+    const int samples = 100;
+    uint32_t sum = 0;
+    for (int i = 0; i < samples; i++) {
+        sum += Battery_GetRaw();
+    }
+    uint16_t raw = sum / samples;
+
+    float vadc = (float)raw / (float)adcMax * vRef;
+    const float calFactor = 1.0131f;  
+    return vadc * vDivider * calFactor;
 }

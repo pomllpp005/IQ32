@@ -121,6 +121,15 @@ extern SPI_HandleTypeDef SSD1306_SPI_PORT;
 #define SSD1306_BUFFER_SIZE   SSD1306_WIDTH * SSD1306_HEIGHT / 8
 #endif
 
+
+// --- กำหนดค่า Graph ---
+#define GRAPH_X_START      8     // ตำแหน่ง X เริ่มต้นของกราฟ
+#define GRAPH_Y_START      8     // ตำแหน่ง Y เริ่มต้นของกราฟ (จากด้านบน)
+#define GRAPH_WIDTH        112   // ความกว้างทั้งหมดของกราฟ
+#define GRAPH_HEIGHT       20    // ความสูงของแท่ง
+#define BAR_WIDTH          6     // ความกว้างของแต่ละแท่ง
+#define BAR_SPACING        1     // ระยะห่างระหว่างแท่ง
+
 // Enumeration for screen colors
 typedef enum {
     Black = 0x00, // Black color, no pixel
@@ -154,10 +163,11 @@ typedef struct {
 } SSD1306_Font_t;
 
 // Procedure definitions
+void OLED_ShowMuxGraph(uint16_t* muxValues, uint16_t threshold);
+void OLED_ShowSInt(const char* str, int value, uint8_t x, uint8_t y);
 void OLED_ShowInt(int value, uint8_t x, uint8_t y);
 void OLED_ShowFloat(float value, uint8_t decimalPlaces, uint8_t x, uint8_t y);
 void OLED_ShowString(char* str, uint8_t x, uint8_t y);
-void OLED_Clear(void);
 void ssd1306_Init(void);
 void ssd1306_Fill(SSD1306_COLOR color);
 void ssd1306_UpdateScreen(void);
@@ -209,6 +219,7 @@ void ssd1306_SetDisplayOn(const uint8_t on);
 uint8_t ssd1306_GetDisplayOn();
 
 // Low-level procedures
+void ssd1306_FillRectangle(uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2, SSD1306_COLOR color);
 void ssd1306_Reset(void);
 void ssd1306_WriteCommand(uint8_t byte);
 void ssd1306_WriteData(uint8_t* buffer, size_t buff_size);

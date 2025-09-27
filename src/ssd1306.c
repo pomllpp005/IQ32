@@ -3,6 +3,7 @@
 #include <stdio.h>   
 #include <math.h>
 #include <stdlib.h>
+#include <limits.h>  
 #include <string.h>  // For memcpy
 
 #if defined(SSD1306_USE_I2C)
@@ -212,17 +213,23 @@ void OLED_ShowInt(int value, uint8_t x, uint8_t y) {
     ssd1306_WriteString(buf, Font_6x8, White);
     
 }
-// void OLED_ShowFloat(float value, uint8_t decimalPlaces, uint8_t x, uint8_t y) {
-//     char buf[16];
-//     char format[8];
-//     sprintf(format, "%%.%df", decimalPlaces);
-//     sprintf(buf, format, value);
-//     ssd1306_SetCursor(x, y);
-//     ssd1306_WriteString(buf, Font_7x10, White);
+void OLED_ShowSInt(const char* str, int value, uint8_t x, uint8_t y)
+{
+    char buf[32];  // buffer สำหรับข้อความ + int
+    if(str == NULL) str = "";
 
-// }
+    // สร้าง string รวมข้อความ + ตัวเลข
+    sprintf(buf, "%s%d", str, value);
+
+    // ตั้ง cursor
+    ssd1306_SetCursorLine(x, y, Font_6x8);
+
+    // เขียน string บน OLED
+    ssd1306_WriteString(buf, Font_6x8, White);
+}
+
 void OLED_ShowFloat(float value, uint8_t decimalPlaces, uint8_t x, uint8_t y) {
-    char buf[20];
+    char buf[24];
     float factor = powf(10, decimalPlaces);
     
     // ปัดค่าก่อนแยกส่วนจำนวนเต็มและทศนิยม
@@ -234,6 +241,90 @@ void OLED_ShowFloat(float value, uint8_t decimalPlaces, uint8_t x, uint8_t y) {
     sprintf(buf, "%ld.%0*ld", intPart, decimalPlaces, fracPart);
     
     // แสดงบนจอ
-    ssd1306_SetCursor(x, y);
-    ssd1306_WriteString(buf, Font_7x10, White);
+    ssd1306_SetCursorLine(x, y, Font_6x8);
+    ssd1306_WriteString(buf, Font_6x8, White);
+}
+
+
+void ssd1306_FillRectangle(uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2, SSD1306_COLOR color) {
+    for (uint8_t x = x1; x <= x2; x++) {
+        for (uint8_t y = y1; y <= y2; y++) {
+            ssd1306_DrawPixel(x, y, color);
+        }
+    }
+}
+void OLED_ShowMuxGraph(uint16_t* muxValues, uint16_t threshold)
+{
+    // เคลียร์หน้าจอ
+    ssd1306_Fill(Black);
+    
+    // นับจำนวน active sensors
+    uint8_t activeCount = 0;
+    for(int i = 0; i < 16; i++) {
+        if(muxValues[i] >= threshold) {
+            activeCount++;
+        }
+    }
+    
+    // แสดงข้อมูลบนบรรทัดแรก
+    char info_str[32];
+    sprintf(info_str, "MUX Thr:%d Act:%d", threshold, activeCount);
+    ssd1306_SetCursorLine(0, 0, Font_6x8);
+    ssd1306_WriteString(info_str, Font_6x8, White);
+    
+    // คำนวณตำแหน่งของแต่ละแท่ง
+    uint8_t totalBarsWidth = (BAR_WIDTH * 16) + (BAR_SPACING * 15);
+    uint8_t startX = (SSD1306_WIDTH - totalBarsWidth) / 2; // จัดกลาง
+    uint8_t graphY = 12; // เริ่มกราฟจากบรรทัดที่ 2
+    
+    // วาดแท่งกราฟ
+    for(int i = 0; i < 16; i++) {
+        uint8_t barX = startX + (i * (BAR_WIDTH + BAR_SPACING));
+        
+        // ตรวจสอบว่าค่าเกิน threshold หรือไม่
+        if(muxValues[i] >= threshold) {
+            // วาดแท่งที่เต็ม (สี White)
+            ssd1306_FillRectangle(barX, graphY, 
+                                barX + BAR_WIDTH - 1, 
+                                graphY + GRAPH_HEIGHT - 1, 
+                                White);
+        }
+        //  else {
+        //     // วาดเฉพาะกรอบแท่ง (แท่งว่าง)
+        //     // วาดขอบบน
+        //     for(int x = 0; x < BAR_WIDTH; x++) {
+        //         ssd1306_DrawPixel(barX + x, graphY, White);
+        //     }
+        //     // วาดขอบล่าง  
+        //     for(int x = 0; x < BAR_WIDTH; x++) {
+        //         ssd1306_DrawPixel(barX + x, graphY + GRAPH_HEIGHT - 1, White);
+        //     }
+        //     // วาดขอบซ้าย
+        //     for(int y = 0; y < GRAPH_HEIGHT; y++) {
+        //         ssd1306_DrawPixel(barX, graphY + y, White);
+        //     }
+        //     // วาดขอบขวา
+        //     for(int y = 0; y < GRAPH_HEIGHT; y++) {
+        //         ssd1306_DrawPixel(barX + BAR_WIDTH - 1, graphY + y, White);
+        //     }
+        // }
+        
+        // แสดงหมายเลขช่อง (0-F) ใต้แท่ง
+        if(i < 10) {
+            // หมายเลข 0-9
+            char num_str[2];
+            sprintf(num_str, "%d", i);
+            ssd1306_SetCursor(barX + 1, graphY + GRAPH_HEIGHT + 2);
+            ssd1306_WriteString(num_str, Font_6x8, White);
+        } else {
+            // หมายเลข A-F (10-15)
+            char hex_str[2];
+            sprintf(hex_str, "%c", 'A' + (i - 10));
+            ssd1306_SetCursor(barX + 1, graphY + GRAPH_HEIGHT + 2);
+            ssd1306_WriteString(hex_str, Font_6x8, White);
+        }
+    }
+    
+    // อัพเดทหน้าจอ
+    ssd1306_UpdateScreen();
 }

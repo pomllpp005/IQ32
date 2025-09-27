@@ -67,10 +67,15 @@ void MUX_Init(void)
 // --- เลือกช่องของ MUX ---
 void MUX_SelectChannel(uint8_t channel)
 {
+    if (channel > 15) return;
+    
     HAL_GPIO_WritePin(MUX_S0_PORT, MUX_S0_PIN, (channel & 0x01) ? GPIO_PIN_SET : GPIO_PIN_RESET);
     HAL_GPIO_WritePin(MUX_S1_PORT, MUX_S1_PIN, (channel & 0x02) ? GPIO_PIN_SET : GPIO_PIN_RESET);
     HAL_GPIO_WritePin(MUX_S2_PORT, MUX_S2_PIN, (channel & 0x04) ? GPIO_PIN_SET : GPIO_PIN_RESET);
     HAL_GPIO_WritePin(MUX_S3_PORT, MUX_S3_PIN, (channel & 0x08) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    
+    // เพิ่ม settling time
+    HAL_Delay(5); // หรือใช้ microsecond delay ถ้ามี
 }
 
 // --- อ่านค่าจากช่องที่เลือก ---

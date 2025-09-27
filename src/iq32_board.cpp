@@ -164,3 +164,22 @@ void Wait_SW2(void){
     LED_Off(LED1);
 
 }
+uint8_t Read_SW1(void){
+    if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_12) == GPIO_PIN_RESET){
+         LED_On(LED2);
+         HAL_Delay(100);
+         LED_Off(LED2);
+        return 1;
+    }
+    return 0;
+}
+uint8_t Read_SW2(void){
+    if(HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_9) == GPIO_PIN_RESET){
+         LED_On(LED1);
+         HAL_Delay(100);
+         LED_Off(LED1);
+        
+        return 1;
+    }
+    return 0;
+}

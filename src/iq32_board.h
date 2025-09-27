@@ -23,6 +23,8 @@ void MX_GPIO_Init(void);
 void MX_TIM2_Init(void);
 void Wait_SW1(void);
 void Wait_SW2(void);
+uint8_t Read_SW1(void);
+uint8_t Read_SW2(void);
 void IQ32_Init(void);   // Init GPIO, TIM, etc.
 
 
