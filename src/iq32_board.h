@@ -3,7 +3,6 @@
 
 #include "stm32f4xx_hal.h"
 #include "iq32_constants.h"
-
 #include "iq32_adc.h"
 #include "iq32_motor.h"
 #include "iq32_fan.h"
@@ -32,7 +31,6 @@ extern SPI_HandleTypeDef hspi1;
 // === SYSTEM STATUS ===
 typedef struct {
     bool system_initialized;
-    bool error_system_ready;
     bool adc_ready;
     bool sensors_calibrated;
     bool pid_running;
@@ -41,16 +39,6 @@ typedef struct {
 } IQ32_SystemStatus_t;
 
 extern IQ32_SystemStatus_t g_system_status;
-
-// === RESULT TYPE (แทน IQ32_Error_t เดิม) ===
-typedef enum {
-    IQ32_OK = 0,
-    IQ32_ERROR = -1,
-    IQ32_ERROR_NOT_INITIALIZED = -2,
-    IQ32_ERROR_NOT_READY = -3,
-    IQ32_ERROR_HARDWARE = -4,
-    IQ32_ERROR_NOT_FOUND = -5
-} IQ32_Result_t;
 
 // === CORE FUNCTIONS ===
 IQ32_Result_t IQ32_Init(void);
@@ -97,7 +85,7 @@ IQ32_Result_t IQ32_LoadCalibration(void);
 #define IQ32_SYSTEM_CHECK() \
     do { \
         if(!g_system_status.system_initialized) { \
-            return IQ32_ERROR_NOT_INITIALIZED; \
+            return IQ32_NOT_INITIALIZED; \
         } \
     } while(0)
 
@@ -132,6 +120,7 @@ typedef enum {
 } IQ32_SystemState_t;
 
 IQ32_SystemState_t IQ32_GetSystemState(void);
+IQ32_Result_t IQ32_SetSystemState(IQ32_SystemState_t state);
 const char* IQ32_SystemStateToString(IQ32_SystemState_t state);
 
 #endif // __IQ32_BOARD_H

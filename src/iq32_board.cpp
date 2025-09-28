@@ -13,7 +13,7 @@ IQ32_SystemState_t IQ32_GetSystemState(void)
     return current_system_state;
 }
 
-IQ32_Error_t IQ32_SetSystemState(IQ32_SystemState_t state)
+IQ32_Result_t IQ32_SetSystemState(IQ32_SystemState_t state)
 {
     current_system_state = state;
     return IQ32_OK;
@@ -34,7 +34,7 @@ const char* IQ32_SystemStateToString(IQ32_SystemState_t state)
 }
 
 // === TIMER INITIALIZATION ===
-IQ32_Error_t MX_TIM2_Init(void)
+IQ32_Result_t MX_TIM2_Init(void)
 {
     __HAL_RCC_TIM2_CLK_ENABLE();
 
@@ -45,7 +45,9 @@ IQ32_Error_t MX_TIM2_Init(void)
     htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
     htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
     
-    IQ32_CHECK_HAL_STATUS(HAL_TIM_PWM_Init(&htim2));
+    if(HAL_TIM_PWM_Init(&htim2) != HAL_OK) {
+        return IQ32_ERROR;
+    }
 
     TIM_OC_InitTypeDef sConfigOC = {0};
     sConfigOC.OCMode = TIM_OCMODE_PWM1;
@@ -55,15 +57,19 @@ IQ32_Error_t MX_TIM2_Init(void)
 
     // Configure all PWM channels
     for(uint32_t channel = TIM_CHANNEL_1; channel <= TIM_CHANNEL_3; channel <<= 1) {
-        IQ32_CHECK_HAL_STATUS(HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, channel));
-        IQ32_CHECK_HAL_STATUS(HAL_TIM_PWM_Start(&htim2, channel));
+        if(HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, channel) != HAL_OK) {
+            return IQ32_ERROR;
+        }
+        if(HAL_TIM_PWM_Start(&htim2, channel) != HAL_OK) {
+            return IQ32_ERROR;
+        }
     }
 
     return IQ32_OK;
 }
 
 // === I2C INITIALIZATION ===
-IQ32_Error_t MX_I2C1_Init(void)
+IQ32_Result_t MX_I2C1_Init(void)
 {
     __HAL_RCC_I2C1_CLK_ENABLE();
     
@@ -77,12 +83,14 @@ IQ32_Error_t MX_I2C1_Init(void)
     hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
     hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
     
-    IQ32_CHECK_HAL_STATUS(HAL_I2C_Init(&hi2c1));
+    if(HAL_I2C_Init(&hi2c1) != HAL_OK) {
+        return IQ32_ERROR;
+    }
     return IQ32_OK;
 }
 
 // === SPI INITIALIZATION ===
-IQ32_Error_t MX_SPI1_Init(void)
+IQ32_Result_t MX_SPI1_Init(void)
 {
     // SPI initialization is handled in MPU6500_Init()
     // This function is here for completeness
@@ -90,7 +98,7 @@ IQ32_Error_t MX_SPI1_Init(void)
 }
 
 // === GPIO INITIALIZATION ===
-IQ32_Error_t MX_GPIO_Init(void)
+IQ32_Result_t MX_GPIO_Init(void)
 {
     // Enable all required clocks
     __HAL_RCC_GPIOA_CLK_ENABLE();
@@ -143,15 +151,129 @@ IQ32_Error_t MX_GPIO_Init(void)
 }
 
 // === MAIN INITIALIZATION ===
-IQ32_Error_t IQ32_Init(void)
+IQ32_Result_t IQ32_Init(void)
 {
     IQ32_SetSystemState(IQ32_STATE_INITIALIZING);
     
-    // Initialize error system first
-    IQ32_Error_Init();
-    g_system_status.error_system_ready = true;
-
     // Initialize HAL
+    if(HAL_Init() != HAL_OK) {
+        return IQ32_ERROR;
+    }
+
+    // Initialize peripherals
+    if(MX_GPIO_Init() != IQ32_OK ||
+       MX_TIM2_Init() != IQ32_OK ||
+       MX_I2C1_Init() != IQ32_OK) {
+        return IQ32_ERROR;
+    }
+
+    // Initialize ADC system
+    if(IQ32_ADC_Init() != IQ32_OK) {
+        return IQ32_ERROR;
+    }
+    g_system_status.adc_ready = true;
+
+    // Initialize subsystems
+    if(MUX_Init() != IQ32_OK ||
+       Battery_Init() != IQ32_OK ||
+       MPU6500_Init() != IQ32_OK ||
+       LED_Init() != IQ32_OK) {
+        return IQ32_ERROR;
+    }
+    
+    // Initialize display
+    ssd1306_Init();
+
+    // Initialize system status
+    g_system_status.system_initialized = true;
+    g_system_status.sensors_calibrated = false;
+    g_system_status.pid_running = false;
+    g_system_status.system_uptime = 0;
+    g_system_status.last_heartbeat = HAL_GetTick();
+
+    // Startup LED sequence
+    if(LED_Blink(LED_ALL, STARTUP_BLINK_COUNT, STARTUP_BLINK_DELAY) != IQ32_OK) {
+        return IQ32_ERROR;
+    }
+
+    IQ32_SetSystemState(IQ32_STATE_READY);
+    return IQ32_OK;
+}
+
+// === SYSTEM DEINITIALIZATION ===
+IQ32_Result_t IQ32_DeInit(void)
+{
+    IQ32_SetSystemState(IQ32_STATE_UNINITIALIZED);
+    
+    // Stop all operations
+    PID_Stop();
+    Motor_Stop();
+    Fan_SetSpeed(0);
+    LED_Off(LED_ALL);
+    
+    // Deinitialize subsystems
+    IQ32_ADC_DeInit();
+    
+    g_system_status.system_initialized = false;
+    return IQ32_OK;
+}
+
+// === SYSTEM MANAGEMENT ===
+IQ32_Result_t IQ32_SystemCheck(void)
+{
+    IQ32_SYSTEM_CHECK();
+    
+    // Check critical subsystems
+    IQ32_CHECK_SUBSYSTEM(g_system_status.adc_ready, IQ32_ERROR);
+    
+    return IQ32_OK;
+}
+
+void IQ32_SystemUpdate(void)
+{
+    uint32_t current_time = HAL_GetTick();
+    
+    // Update system uptime
+    g_system_status.system_uptime = current_time;
+    
+    // Check heartbeat
+    if((current_time - g_system_status.last_heartbeat) > IQ32_HEARTBEAT_INTERVAL) {
+        IQ32_Heartbeat();
+    }
+    
+    // Update PID status
+    g_system_status.pid_running = pidController.isRunning;
+}
+
+void IQ32_Heartbeat(void)
+{
+    IQ32_UPDATE_HEARTBEAT();
+    
+    // Brief LED flash to show system is alive
+    if(IQ32_GetSystemState() == IQ32_STATE_READY || 
+       IQ32_GetSystemState() == IQ32_STATE_RUNNING) {
+        LED_On(LED1);
+        HAL_Delay(10);
+        LED_Off(LED1);
+    }
+}
+
+uint32_t IQ32_GetUptime(void)
+{
+    return g_system_status.system_uptime;
+}
+
+const char* IQ32_GetVersion(void)
+{
+    return IQ32_FIRMWARE_VERSION;
+}
+
+const char* IQ32_GetBuildInfo(void)
+{
+    static char build_info[64];
+    snprintf(build_info, sizeof(build_info), "Built: %s %s", IQ32_BUILD_DATE, IQ32_BUILD_TIME);
+    return build_info;
+}// Initialize HAL
     IQ32_CHECK_HAL_STATUS(HAL_Init());
 
     // Initialize peripherals
@@ -276,7 +398,6 @@ void Wait_SW1(void)
 {
     while(HAL_GPIO_ReadPin(SW1_PORT, SW1_PIN) == GPIO_PIN_SET) {}
     HAL_Delay(DEBOUNCE_DELAY);
-    
     LED_Blink(LED2, 2, 100);
 }
 
@@ -284,7 +405,6 @@ void Wait_SW2(void)
 {
     while(HAL_GPIO_ReadPin(SW2_PORT, SW2_PIN) == GPIO_PIN_SET) {}
     HAL_Delay(DEBOUNCE_DELAY);
-    
     LED_Blink(LED1, 2, 100);
 }
 
@@ -310,16 +430,20 @@ uint8_t Read_SW2(void)
     return 0;
 }
 
-IQ32_Error_t IQ32_WaitForSwitch(uint8_t switch_num, uint32_t timeout_ms)
+IQ32_Result_t IQ32_WaitForSwitch(uint8_t switch_num, uint32_t timeout_ms)
 {
-    IQ32_VALIDATE_RANGE(switch_num, 1, 2);
+    if(!VALIDATE_RANGE(switch_num, 1, 2)) {
+        return IQ32_INVALID_PARAM;
+    }
     
     uint32_t start_time = HAL_GetTick();
     GPIO_TypeDef* port = (switch_num == 1) ? SW1_PORT : SW2_PORT;
     uint16_t pin = (switch_num == 1) ? SW1_PIN : SW2_PIN;
     
     while(HAL_GPIO_ReadPin(port, pin) == GPIO_PIN_SET) {
-        IQ32_CHECK_TIMEOUT(start_time, timeout_ms);
+        if((HAL_GetTick() - start_time) > timeout_ms) {
+            return IQ32_TIMEOUT;
+        }
         HAL_Delay(10);
     }
     
@@ -328,7 +452,7 @@ IQ32_Error_t IQ32_WaitForSwitch(uint8_t switch_num, uint32_t timeout_ms)
 }
 
 // === EMERGENCY FUNCTIONS ===
-IQ32_Error_t IQ32_EmergencyStop(void)
+IQ32_Result_t IQ32_EmergencyStop(void)
 {
     IQ32_SetSystemState(IQ32_STATE_EMERGENCY);
     
@@ -339,19 +463,17 @@ IQ32_Error_t IQ32_EmergencyStop(void)
     
     // Visual indication
     LED_Blink(LED_ALL, 10, 100);
-    
     return IQ32_OK;
 }
 
-IQ32_Error_t IQ32_EmergencyRecovery(void)
+IQ32_Result_t IQ32_EmergencyRecovery(void)
 {
     if(IQ32_GetSystemState() != IQ32_STATE_EMERGENCY) {
-        return IQ32_ERROR_NOT_READY;
+        return IQ32_ERROR;
     }
     
     // Clear emergency conditions
     PID_ClearEmergencyStop();
-    IQ32_Error_Clear();
     
     // Return to ready state
     IQ32_SetSystemState(IQ32_STATE_READY);
@@ -366,7 +488,7 @@ bool IQ32_IsEmergencyState(void)
 }
 
 // === DIAGNOSTIC FUNCTIONS ===
-IQ32_Error_t IQ32_SelfTest(void)
+IQ32_Result_t IQ32_SelfTest(void)
 {
     IQ32_SYSTEM_CHECK();
     
@@ -381,12 +503,15 @@ IQ32_Error_t IQ32_SelfTest(void)
     
     // Test ADC
     uint16_t adc_value;
-    IQ32_RETURN_IF_ERROR(IQ32_ADC_Read(IQ32_ADC_CHANNEL_BATTERY, &adc_value));
+    if(IQ32_ADC_Read(IQ32_ADC_CHANNEL_BATTERY, &adc_value) != IQ32_OK) {
+        return IQ32_ERROR;
+    }
     
     // Test IMU
     uint8_t whoami;
-    IQ32_RETURN_IF_ERROR(MPU6500_WhoAmI(&whoami));
-    IQ32_VALIDATE_PARAM(whoami == MPU6500_WHO_AM_I_VALUE);
+    if(MPU6500_WhoAmI(&whoami) != IQ32_OK || whoami != MPU6500_WHO_AM_I_VALUE) {
+        return IQ32_ERROR;
+    }
     
     ssd1306_Fill(Black);
     ssd1306_SetCursorLine(0, 0, Font_6x8);
@@ -397,7 +522,7 @@ IQ32_Error_t IQ32_SelfTest(void)
     return IQ32_OK;
 }
 
-IQ32_Error_t IQ32_RunDiagnostics(void)
+IQ32_Result_t IQ32_RunDiagnostics(void)
 {
     return IQ32_SelfTest();
 }
@@ -428,29 +553,26 @@ void IQ32_DisplayErrorStatus(void)
 {
     ssd1306_Fill(Black);
     ssd1306_SetCursorLine(0, 0, Font_6x8);
-    ssd1306_WriteString("Error Status", Font_6x8, White);
+    ssd1306_WriteString("System Status", Font_6x8, White);
     
-    char error_str[32];
-    snprintf(error_str, sizeof(error_str), "Last: %s", 
-             IQ32_Error_ToString(IQ32_Error_GetLast()));
     ssd1306_SetCursorLine(0, 1, Font_6x8);
-    ssd1306_WriteString(error_str, Font_6x8, White);
+    ssd1306_WriteString(IQ32_SystemStateToString(IQ32_GetSystemState()), Font_6x8, White);
     
-    char count_str[32];
-    snprintf(count_str, sizeof(count_str), "Total: %lu", IQ32_Error_GetTotalCount());
+    char adc_str[32];
+    snprintf(adc_str, sizeof(adc_str), "ADC: %s", g_system_status.adc_ready ? "OK" : "FAIL");
     ssd1306_SetCursorLine(0, 2, Font_6x8);
-    ssd1306_WriteString(count_str, Font_6x8, White);
+    ssd1306_WriteString(adc_str, Font_6x8, White);
     
-    if(IQ32_Error_HasCriticalErrors()) {
-        ssd1306_SetCursorLine(0, 3, Font_6x8);
-        ssd1306_WriteString("CRITICAL!", Font_6x8, White);
-    }
+    char cal_str[32];
+    snprintf(cal_str, sizeof(cal_str), "Cal: %s", g_system_status.sensors_calibrated ? "OK" : "NO");
+    ssd1306_SetCursorLine(0, 3, Font_6x8);
+    ssd1306_WriteString(cal_str, Font_6x8, White);
     
     ssd1306_UpdateScreen();
 }
 
 // === CALIBRATION FUNCTIONS ===
-IQ32_Error_t IQ32_CalibrateAll(void)
+IQ32_Result_t IQ32_CalibrateAll(void)
 {
     IQ32_SYSTEM_CHECK();
     IQ32_SetSystemState(IQ32_STATE_CALIBRATING);
@@ -461,10 +583,14 @@ IQ32_Error_t IQ32_CalibrateAll(void)
     ssd1306_UpdateScreen();
     
     // Calibrate sensors
-    IQ32_RETURN_IF_ERROR(IQ32_CalibrateSensors(5000));
+    if(IQ32_CalibrateSensors(5000) != IQ32_OK) {
+        return IQ32_ERROR;
+    }
     
     // Calibrate IMU
-    IQ32_RETURN_IF_ERROR(IQ32_CalibrateIMU());
+    if(IQ32_CalibrateIMU() != IQ32_OK) {
+        return IQ32_ERROR;
+    }
     
     g_system_status.sensors_calibrated = true;
     IQ32_SetSystemState(IQ32_STATE_READY);
@@ -478,36 +604,35 @@ IQ32_Error_t IQ32_CalibrateAll(void)
     return IQ32_OK;
 }
 
-IQ32_Error_t IQ32_CalibrateSensors(uint32_t duration_ms)
+IQ32_Result_t IQ32_CalibrateSensors(uint32_t duration_ms)
 {
     return LineSensor_Calibrate(duration_ms);
 }
 
-IQ32_Error_t IQ32_CalibrateIMU(void)
+IQ32_Result_t IQ32_CalibrateIMU(void)
 {
     // Basic IMU calibration - read samples and establish baseline
     float ax, ay, az, gx, gy, gz;
     
     for(int i = 0; i < 100; i++) {
-        IQ32_RETURN_IF_ERROR(MPU6500_ReadAccelGyro(&ax, &ay, &az, &gx, &gy, &gz));
+        if(MPU6500_ReadAccelGyro(&ax, &ay, &az, &gx, &gy, &gz) != IQ32_OK) {
+            return IQ32_ERROR;
+        }
         HAL_Delay(10);
     }
     
     return IQ32_OK;
 }
 
-IQ32_Error_t IQ32_SaveCalibration(void)
+IQ32_Result_t IQ32_SaveCalibration(void)
 {
     return PID_SaveSettings();
 }
 
-IQ32_Error_t IQ32_LoadCalibration(void)
+IQ32_Result_t IQ32_LoadCalibration(void)
 {
     return PID_LoadSettings();
 }
-
-IQ32_Result_t MX_I2C1_Init(void)
-{
     __HAL_RCC_I2C1_CLK_ENABLE();
     
     hi2c1.Instance = I2C1;
@@ -577,7 +702,7 @@ IQ32_Result_t MX_GPIO_Init(void)
 }
 
 // === MAIN INITIALIZATION ===
-IQ32_Error_t IQ32_Init(void)
+IQ32_Result_t IQ32_Init(void)
 {
     if(HAL_Init() != HAL_OK) {
         return IQ32_ERROR;
