@@ -1,60 +1,67 @@
+
+// ========== iq32_linesensor.cpp ==========
 #include "iq32_linesensor.h"
 #include "iq32_led.h"
 
-// --- ตัวแปร Global ---
 LineSensor_t lineSensor;
 
-// --- เริ่มต้น Line Sensor ---
-void LineSensor_Init(void)
+IQ32_Result_t LineSensor_Init(void)
 {
-    // เริ่มต้น MUX (ถ้ายังไม่ได้เริ่มต้น)
-    MUX_Init();
+    // Initialize MUX if not already done
+    IQ32_Result_t result = MUX_Init();
+    if(result != IQ32_OK) return result;
     
-    // ตั้งค่าเริ่มต้น
+    // Initialize sensor structure
     lineSensor.threshold = DEFAULT_THRESHOLD;
     lineSensor.isCalibrated = false;
     lineSensor.isOnLine = false;
-    lineSensor.position = 0;
+    lineSensor.position = SENSOR_CENTER;
     lineSensor.activeSensorCount = 0;
     
-    // กำหนดค่าเริ่มต้นสำหรับ calibration
-    for(int i = 0; i < NUM_SENSORS; i++) {
-        lineSensor.calibratedMin[i] = 4095;  // ค่าสูงสุดของ ADC 12-bit
-        lineSensor.calibratedMax[i] = 0;     // ค่าต่ำสุด
+    // Initialize calibration arrays
+    for(int i = 0; i < MAX_SENSORS; i++) {
+        lineSensor.calibratedMin[i] = ADC_RESOLUTION;
+        lineSensor.calibratedMax[i] = 0;
         lineSensor.sensorActive[i] = false;
         lineSensor.rawValues[i] = 0;
     }
+    
+    return IQ32_OK;
 }
 
-// --- ตั้งค่า Threshold ---
-void LineSensor_SetThreshold(uint16_t threshold)
+IQ32_Result_t LineSensor_SetThreshold(uint16_t threshold)
 {
+    if(!VALIDATE_RANGE(threshold, 0, ADC_RESOLUTION)) {
+        return IQ32_OUT_OF_RANGE;
+    }
+    
     lineSensor.threshold = threshold;
+    return IQ32_OK;
 }
 
-// --- อ่านค่าดิบจาก MUX ---
-void LineSensor_ReadRaw(void)
+IQ32_Result_t LineSensor_ReadRaw(void)
 {
-    for(int i = 0; i < NUM_SENSORS; i++) {
-        MUX_SelectChannel(i);
+    for(int i = 0; i < MAX_SENSORS; i++) {
+        IQ32_Result_t result = MUX_SelectChannel(i);
+        if(result != IQ32_OK) return result;
+        
         lineSensor.rawValues[i] = MUX_Read();
     }
+    return IQ32_OK;
 }
 
-// --- สอบเทียบเซ็นเซอร์ ---
-void LineSensor_Calibrate(uint32_t calibrationTime)
+IQ32_Result_t LineSensor_Calibrate(uint32_t calibrationTime)
 {
+    if(calibrationTime == 0) calibrationTime = DEFAULT_CALIB_TIME;
+
     uint32_t startTime = HAL_GetTick();
-    
-    // กะพริบ LED เพื่อแสดงสถานะการ calibrate
-    LED_On(LED1);
-    LED_On(LED2);
+    LED_On(LED_ALL);
     
     while((HAL_GetTick() - startTime) < calibrationTime) {
         LineSensor_ReadRaw();
         
-        // อัพเดทค่า min และ max
-        for(int i = 0; i < NUM_SENSORS; i++) {
+        // Update min and max values
+        for(int i = 0; i < MAX_SENSORS; i++) {
             if(lineSensor.rawValues[i] < lineSensor.calibratedMin[i]) {
                 lineSensor.calibratedMin[i] = lineSensor.rawValues[i];
             }
@@ -63,8 +70,8 @@ void LineSensor_Calibrate(uint32_t calibrationTime)
             }
         }
         
-        // กะพริบ LED
-        if((HAL_GetTick() - startTime) % 500 < 250) {
+        // Visual indication
+        if((HAL_GetTick() - startTime) % BLINK_INTERVAL < (BLINK_INTERVAL / 2)) {
             LED_On(LED1);
             LED_Off(LED2);
         } else {
@@ -75,17 +82,13 @@ void LineSensor_Calibrate(uint32_t calibrationTime)
         HAL_Delay(10);
     }
     
-    // คำนวณ threshold สำหรับแต่ละเซ็นเซอร์
     lineSensor.isCalibrated = true;
+    LED_Off(LED_ALL);
+    HAL_Delay(500);
     
-    // ปิด LED
-    LED_Off(LED1);
-    LED_Off(LED2);
-    
-    HAL_Delay(500); // หน่วงเล็กน้อยเพื่อแสดงว่าเสร็จสิ้น
+    return IQ32_OK;
 }
 
-// --- อ่านตำแหน่งของเส้น ---
 uint16_t LineSensor_ReadPosition(void)
 {
     LineSensor_ReadRaw();
@@ -94,24 +97,23 @@ uint16_t LineSensor_ReadPosition(void)
     uint32_t weightedSum = 0;
     lineSensor.activeSensorCount = 0;
     
-    // คำนวณ weighted average
-    for(int i = 0; i < NUM_SENSORS; i++) {
+    // Calculate weighted average
+    for(int i = 0; i < MAX_SENSORS; i++) {
         uint16_t calibratedValue = lineSensor.rawValues[i];
         
-        // ใช้ calibrated values ถ้ามีการ calibrate แล้ว
+        // Apply calibration if available
         if(lineSensor.isCalibrated) {
             uint16_t range = lineSensor.calibratedMax[i] - lineSensor.calibratedMin[i];
             if(range > 0) {
-                calibratedValue = ((lineSensor.rawValues[i] - lineSensor.calibratedMin[i]) * 4095) / range;
+                calibratedValue = ((lineSensor.rawValues[i] - lineSensor.calibratedMin[i]) * ADC_RESOLUTION) / range;
             }
         }
         
-        // ตรวจสอบว่าเซ็นเซอร์นี้เห็นเส้นหรือไม่
+        // Check if sensor sees line
         if(calibratedValue >= lineSensor.threshold) {
             lineSensor.sensorActive[i] = true;
             lineSensor.activeSensorCount++;
             
-            // คำนวณ position (0 = ซ้ายสุด, (NUM_SENSORS-1)*1000 = ขวาสุด)
             sum += calibratedValue;
             weightedSum += calibratedValue * (i * 1000);
         } else {
@@ -119,38 +121,36 @@ uint16_t LineSensor_ReadPosition(void)
         }
     }
     
-    // คำนวณตำแหน่ง
+    // Calculate position
     if(sum > 0) {
         lineSensor.position = weightedSum / sum;
         lineSensor.isOnLine = true;
     } else {
         lineSensor.isOnLine = false;
-        // รักษาตำแหน่งเดิมถ้าไม่เจอเส้น
+        // Keep previous position when no line detected
     }
     
     return lineSensor.position;
 }
 
-// --- ตรวจสอบว่ามีเส้นหรือไม่ ---
 bool LineSensor_IsOnLine(void)
 {
     return lineSensor.isOnLine;
 }
 
-// --- นับจำนวนเซ็นเซอร์ที่ active ---
 uint8_t LineSensor_GetActiveSensorCount(void)
 {
     return lineSensor.activeSensorCount;
 }
 
-// --- แสดงค่าเซ็นเซอร์ (ไม่ใช้ OLED) ---
-void LineSensor_PrintValues(void)
+IQ32_Result_t LineSensor_PrintValues(void)
 {
-    // ฟังก์ชันนี้ไม่ทำอะไร หรือสามารถส่งข้อมูลผ่าน UART ได้
-    // หรือใช้ LED เพื่อแสดงสถานะแทน
+    // Use LED to indicate line detection status
     if(lineSensor.isOnLine) {
         LED_On(LED2);
     } else {
         LED_Off(LED2);
     }
+    
+    return IQ32_OK;
 }
