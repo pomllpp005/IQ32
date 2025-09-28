@@ -1,15 +1,32 @@
 #ifndef __IQ32_BOARD_H
 #define __IQ32_BOARD_H
 
+<<<<<<< HEAD
 #include "stm32f4xx_hal.h"
 #include "iq32_constants.h"
 #include "iq32_adc.h"
+=======
+#define MAX_SENSORS 16       // ปรับตามจริง เช่น 5, 6, 8
+#define ADC_RESOLUTION 12  // ถ้า 12 บิต ADC
+
+// โครงสร้างผลลัพธ์มาตรฐาน
+typedef enum {
+    IQ32_OK = 0,
+    IQ32_ERROR = -1,
+    IQ32_TIMEOUT = -2,
+    IQ32_INVALID_PARAM = -3
+} IQ32_Result_t;
+
+#include "stm32f4xx_hal.h"
+#include <Arduino.h>
+>>>>>>> 39340a1 (v1)
 #include "iq32_motor.h"
 #include "iq32_fan.h"
 #include "iq32_led.h"
 #include "iq32_battery.h"
 #include "iq32_mpu6500.h"
 #include "iq32_Mux.h"
+<<<<<<< HEAD
 #include "iq32_linesensor.h"
 #include "iq32_pid_improved.h"
 #include "iq32_pid_advanced.h"
@@ -57,10 +74,27 @@ const char* IQ32_GetVersion(void);
 const char* IQ32_GetBuildInfo(void);
 
 // === SWITCH FUNCTIONS ===
+=======
+#include "ssd1306_fonts.h"
+#include "ssd1306.h"
+#include "iq32_readLine.h"
+#include "iq32_PID.h"
+
+#include <stdbool.h>
+#include <stdint.h>
+
+// TIM handle (define in one .c file, declare extern here)
+extern TIM_HandleTypeDef htim2;
+
+// Prototypes that IQ32_Init calls
+void MX_GPIO_Init(void);
+void MX_TIM2_Init(void);
+>>>>>>> 39340a1 (v1)
 void Wait_SW1(void);
 void Wait_SW2(void);
 uint8_t Read_SW1(void);
 uint8_t Read_SW2(void);
+<<<<<<< HEAD
 IQ32_Result_t IQ32_WaitForSwitch(uint8_t switch_num, uint32_t timeout_ms);
 
 // === EMERGENCY FUNCTIONS ===
@@ -124,3 +158,9 @@ IQ32_Result_t IQ32_SetSystemState(IQ32_SystemState_t state);
 const char* IQ32_SystemStateToString(IQ32_SystemState_t state);
 
 #endif // __IQ32_BOARD_H
+=======
+void IQ32_Init(void);   // Init GPIO, TIM, etc.
+
+
+#endif
+>>>>>>> 39340a1 (v1)
